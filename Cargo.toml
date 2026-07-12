@@ -32,10 +32,10 @@ gpui-component-macros = { path = "crates/macros", version = "0.5.1" }
 gpui-component-assets = { path = "crates/assets", version = "0.5.1" }
 story = { path = "crates/story" }
 
-gpui = { git = "https://github.com/zed-industries/zed" }
-gpui_platform = { git = "https://github.com/zed-industries/zed", features = ["font-kit", "x11", "wayland", "runtime_shaders"] }
-gpui_web = { git = "https://github.com/zed-industries/zed" }
-gpui_macros = { git = "https://github.com/zed-industries/zed" }
+gpui = { git = "https://github.com/xjeffw/gpui-ce.git", rev = "cef5786bbff5c8e3f45a1a81f9e4653882d2a5a3" }
+gpui_platform = { git = "https://github.com/xjeffw/gpui-ce.git", rev = "cef5786bbff5c8e3f45a1a81f9e4653882d2a5a3", features = ["font-kit", "x11", "wayland", "runtime_shaders"] }
+gpui_web = { git = "https://github.com/xjeffw/gpui-ce.git", rev = "cef5786bbff5c8e3f45a1a81f9e4653882d2a5a3" }
+gpui_macros = { git = "https://github.com/xjeffw/gpui-ce.git", rev = "cef5786bbff5c8e3f45a1a81f9e4653882d2a5a3" }
 reqwest_client = { git = "https://github.com/zed-industries/zed" }
 sum-tree = { version = "0.2.0", package = "zed-sum-tree" }
 # reqwest = { version = "0.12.15-zed", package = "zed-reqwest" }

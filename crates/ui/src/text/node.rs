@@ -1475,7 +1475,10 @@ impl BlockNode {
                         // keeps columns from collapsing when the table is wider
                         // than the viewport and scrolls.
                         .flex_basis(px(width))
-                        .flex_grow(width)
+                        .map(|mut this| {
+                            this.style().flex_grow = Some(width);
+                            this
+                        })
                         .flex_shrink_0()
                         .overflow_hidden()
                         .whitespace_nowrap()
