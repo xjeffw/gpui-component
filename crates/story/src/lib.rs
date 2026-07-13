@@ -29,6 +29,8 @@ pub use crate::title_bar::AppTitleBar;
 pub use gallery::Gallery;
 pub use stories::*;
 
+rust_i18n::i18n!("locales", fallback = "en");
+
 #[derive(Action, Clone, PartialEq, Eq, Deserialize)]
 #[action(namespace = story, no_json)]
 pub struct SelectScrollbarShow(ScrollbarShow);
@@ -153,6 +155,46 @@ pub fn create_new_window_with_size<F, E>(
 
 impl Global for AppState {}
 
+#[cfg(not(target_family = "wasm"))]
+struct GpuiHttpClient(reqwest_client::ReqwestClient);
+
+#[cfg(not(target_family = "wasm"))]
+impl gpui::http_client::HttpClient for GpuiHttpClient {
+    fn get(
+        &self,
+        url: &str,
+        follow_redirects: bool,
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::future::Future<Output = anyhow::Result<gpui::http_client::HttpResponse>>
+                + Send
+                + 'static,
+        >,
+    > {
+        let response = http_client::HttpClient::get(
+            &self.0,
+            url,
+            http_client::AsyncBody::default(),
+            follow_redirects,
+        );
+
+        Box::pin(async move {
+            use smol::io::AsyncReadExt as _;
+
+            let response = response.await?;
+            let status = response.status();
+            let mut body = response.into_body();
+            let mut bytes = Vec::new();
+            body.read_to_end(&mut bytes).await?;
+
+            Ok(gpui::http_client::HttpResponse {
+                status,
+                body: bytes,
+            })
+        })
+    }
+}
+
 pub fn init(cx: &mut App) {
     // Try to initialize tracing subscriber, but ignore if already initialized
     #[cfg(not(target_family = "wasm"))]
@@ -180,6 +222,7 @@ pub fn init(cx: &mut App) {
             .try_init();
     }
 
+    rust_i18n::extend!(gpui_component);
     gpui_component::init(cx);
     AppState::init(cx);
     themes::init(cx);
@@ -189,7 +232,7 @@ pub fn init(cx: &mut App) {
     {
         let http_client =
             reqwest_client::ReqwestClient::user_agent("gpui-component/story").unwrap();
-        cx.set_http_client(std::sync::Arc::new(http_client));
+        cx.set_http_client(std::sync::Arc::new(GpuiHttpClient(http_client)));
     }
 
     #[cfg(target_family = "wasm")]
@@ -714,5 +757,22 @@ impl Render for StoryRoot {
                     .children(dialog_layer)
                     .children(notification_layer),
             )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn extends_component_translations_with_story_locales() {
+        rust_i18n::extend!(gpui_component);
+
+        assert_eq!(
+            gpui_component::_rust_i18n_try_translate("fr", "Calendar.month.January"),
+            Some("Janvier".into())
+        );
+        assert_eq!(
+            gpui_component::_rust_i18n_try_translate("en", "Calendar.month.January"),
+            Some("January".into())
+        );
     }
 }

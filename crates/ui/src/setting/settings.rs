@@ -9,10 +9,96 @@ use crate::{
     sidebar::{Sidebar, SidebarMenu, SidebarMenuItem},
 };
 use gpui::{
-    App, AppContext as _, Axis, ElementId, Entity, IntoElement, ParentElement as _, Pixels,
-    RenderOnce, StyleRefinement, Styled, Window, div, prelude::FluentBuilder as _, px, relative,
+    AnyElement, App, AppContext as _, AvailableSpace, Axis, Bounds, Element, ElementId, Entity,
+    GlobalElementId, InspectorElementId, IntoElement, LayoutId, ParentElement as _, Pixels,
+    RenderOnce, Size as GpuiSize, Style, StyleRefinement, Styled, Window, div,
+    prelude::FluentBuilder as _, px, relative,
 };
 use rust_i18n::t;
+
+const STACKED_LAYOUT_MAX_WIDTH: Pixels = px(480.);
+
+fn container_query<E>(
+    render: impl 'static + FnOnce(GpuiSize<Pixels>, &mut Window, &mut App) -> E,
+) -> ContainerQuery
+where
+    E: IntoElement,
+{
+    ContainerQuery {
+        render: Some(Box::new(|size, window, cx| {
+            render(size, window, cx).into_any_element()
+        })),
+    }
+}
+
+struct ContainerQuery {
+    render: Option<Box<dyn FnOnce(GpuiSize<Pixels>, &mut Window, &mut App) -> AnyElement>>,
+}
+
+impl Element for ContainerQuery {
+    type RequestLayoutState = ();
+    type PrepaintState = Option<AnyElement>;
+
+    fn id(&self) -> Option<ElementId> {
+        None
+    }
+
+    fn source_location(&self) -> Option<&'static std::panic::Location<'static>> {
+        None
+    }
+
+    fn request_layout(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> (LayoutId, Self::RequestLayoutState) {
+        let mut style = Style::default();
+        style.size.width = relative(1.).into();
+        style.size.height = relative(1.).into();
+        (window.request_layout(style, None, cx), ())
+    }
+
+    fn prepaint(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        bounds: Bounds<Pixels>,
+        _: &mut Self::RequestLayoutState,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Self::PrepaintState {
+        let render = self.render.take()?;
+        let mut child = render(bounds.size, window, cx);
+        child.layout_as_root(bounds.size.map(AvailableSpace::Definite), window, cx);
+        child.prepaint_at(bounds.origin, window, cx);
+        Some(child)
+    }
+
+    fn paint(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        _: Bounds<Pixels>,
+        _: &mut Self::RequestLayoutState,
+        prepaint: &mut Self::PrepaintState,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        if let Some(child) = prepaint {
+            child.paint(window, cx);
+        }
+    }
+}
+
+impl IntoElement for ContainerQuery {
+    type Element = Self;
+
+    fn into_element(self) -> Self::Element {
+        self
+    }
+}
 
 /// The settings structure containing multiple pages for app settings.
 ///
@@ -145,7 +231,7 @@ impl Settings {
         options: &RenderOptions,
         window: &mut Window,
         cx: &mut App,
-    ) -> impl IntoElement {
+    ) -> gpui::AnyElement {
         let selected_index = state.read(cx).selected_index;
 
         for (ix, page) in pages.into_iter().enumerate() {
@@ -294,20 +380,29 @@ impl RenderOnce for Settings {
             disabled: false,
         };
         let sidebar_size_range = self.sidebar_size_range.clone();
+        let sidebar = self
+            .render_sidebar(&state, &filtered_pages, window, cx)
+            .into_any_element();
 
         h_resizable(self.id.clone())
             .child(
                 resizable_panel()
                     .size(self.sidebar_width)
                     .size_range(sidebar_size_range)
-                    .child(self.render_sidebar(&state, &filtered_pages, window, cx)),
+                    .child(sidebar),
             )
-            .child(resizable_panel().child(self.render_active_page(
-                &state,
-                &filtered_pages,
-                &options,
-                window,
-                cx,
-            )))
+            .child(
+                resizable_panel().child(container_query(move |size, window, cx| {
+                    let options = RenderOptions {
+                        layout: if size.width <= STACKED_LAYOUT_MAX_WIDTH {
+                            Axis::Vertical
+                        } else {
+                            Axis::Horizontal
+                        },
+                        ..options
+                    };
+                    self.render_active_page(&state, &filtered_pages, &options, window, cx)
+                })),
+            )
     }
 }
