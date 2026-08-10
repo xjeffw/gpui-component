@@ -21,15 +21,17 @@
             extensions = [ "rust-src" ];
           })
         ];
-        dynamic-libraries = with pkgs; [
+        # GPUI uses these libraries for its Linux X11/Wayland backends. They
+        # either are not supported or are not needed when building on Darwin.
+        dynamic-libraries = with pkgs; lib.optionals stdenv.isLinux [
           wayland
-          
+
           vulkan-headers
           vulkan-loader
-          
+
           libxcb
           libxkbcommon
-          
+
           atk
           fontconfig
           gio-sharp
@@ -48,7 +50,7 @@
           };
           nativeBuildInputs = build-dependencies;
           buildInputs = dynamic-libraries;
-          postFixup = ''
+          postFixup = pkgs.lib.optionalString pkgs.stdenv.isLinux ''
             wrapProgram $out/bin/gpui-component-story \
             --suffix LD_LIBRARY_PATH : ${pkgs.lib.makeLibraryPath dynamic-libraries}
           '';
@@ -58,6 +60,7 @@
 
           env = {
             RUST_BACKTRACE = "1";
+          } // lib.optionalAttrs stdenv.isLinux {
             LD_LIBRARY_PATH = lib.makeLibraryPath dynamic-libraries;
           };
         };
