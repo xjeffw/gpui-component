@@ -1293,6 +1293,13 @@ impl BlockNode {
                                     }
                                 }
 
+                                // The checkbox is sized from the root rem size, while the text
+                                // beside it is a line box sized from the ambient font size, so a
+                                // fixed top margin only lines the two up at one particular font
+                                // size. Center the checkbox in a box as tall as one line of that
+                                // text instead, so it tracks the text at any size.
+                                let line_height = window.line_height();
+
                                 items.push(
                                     h_flex()
                                         .w_full()
@@ -1313,22 +1320,30 @@ impl BlockNode {
                                             this.child(
                                                 div()
                                                     .flex()
-                                                    .mt(rems(0.4))
+                                                    .h(line_height)
                                                     .mr_1p5()
-                                                    .size(rems(0.875))
                                                     .items_center()
-                                                    .justify_center()
-                                                    .rounded(cx.theme().radius.half())
-                                                    .border_1()
-                                                    .border_color(cx.theme().primary)
-                                                    .text_color(cx.theme().primary_foreground)
-                                                    .when(checked, |this| {
-                                                        this.bg(cx.theme().tokens.primary).child(
-                                                            Icon::new(IconName::Check)
-                                                                .size_2()
-                                                                .text_xs(),
-                                                        )
-                                                    }),
+                                                    .child(
+                                                        div()
+                                                            .flex()
+                                                            .size(rems(0.875))
+                                                            .items_center()
+                                                            .justify_center()
+                                                            .rounded(cx.theme().radius.half())
+                                                            .border_1()
+                                                            .border_color(cx.theme().primary)
+                                                            .text_color(
+                                                                cx.theme().primary_foreground,
+                                                            )
+                                                            .when(checked, |this| {
+                                                                this.bg(cx.theme().tokens.primary)
+                                                                    .child(
+                                                                        Icon::new(IconName::Check)
+                                                                            .size_2()
+                                                                            .text_xs(),
+                                                                    )
+                                                            }),
+                                                    ),
                                             )
                                         })
                                         .child(
