@@ -5,16 +5,16 @@ use std::{
 
 use gpui::{
     AbsoluteLength, AnyElement, App, AvailableSpace, Bounds, DefiniteLength, Element, ElementId,
-    GlobalElementId, HighlightStyle, InspectorElementId, InteractiveElement as _, IntoElement,
-    LayoutId, LineFragment as WrapLineFragment, ObjectFit, Pixels, ShapedLine, SharedString,
-    SharedUri, Size, StatefulInteractiveElement as _, Styled, StyledImage as _, TextRun, TextStyle,
-    WhiteSpace, Window, img, point, prelude::FluentBuilder as _, px, relative, size,
+    GlobalElementId, InspectorElementId, InteractiveElement as _, IntoElement, LayoutId,
+    LineFragment as WrapLineFragment, ObjectFit, Pixels, ShapedLine, SharedString, SharedUri, Size,
+    StatefulInteractiveElement as _, Styled, StyledImage as _, TextRun, TextStyle, WhiteSpace,
+    Window, img, point, prelude::FluentBuilder as _, px, relative, size,
 };
 
-use crate::{WindowExt as _, tooltip::Tooltip};
+use crate::{ActiveTheme as _, WindowExt as _, tooltip::Tooltip};
 
 use super::{
-    inline::{Inline, InlineState},
+    inline::{Inline, InlineHighlights, InlineState},
     node::LinkMark,
 };
 
@@ -30,7 +30,7 @@ pub(super) enum InlineFlowItem {
         state: Arc<Mutex<InlineState>>,
         text: SharedString,
         links: Vec<(Range<usize>, LinkMark)>,
-        highlights: Vec<(Range<usize>, HighlightStyle)>,
+        highlights: InlineHighlights,
     },
     Image {
         url: SharedUri,
@@ -61,7 +61,7 @@ enum PositionedFragment {
         source_range: Range<usize>,
         text: SharedString,
         links: Vec<(Range<usize>, LinkMark)>,
-        highlights: Vec<(Range<usize>, HighlightStyle)>,
+        highlights: InlineHighlights,
     },
     Image {
         item_ix: usize,
@@ -74,7 +74,7 @@ enum MeasureItem {
     Text {
         text: SharedString,
         links: Vec<(Range<usize>, LinkMark)>,
-        highlights: Vec<(Range<usize>, HighlightStyle)>,
+        highlights: InlineHighlights,
     },
     Image {
         url: SharedUri,
@@ -94,7 +94,7 @@ enum LineFragmentKind {
     Text {
         text: SharedString,
         links: Vec<(Range<usize>, LinkMark)>,
-        highlights: Vec<(Range<usize>, HighlightStyle)>,
+        highlights: InlineHighlights,
     },
     Image,
 }
@@ -185,7 +185,7 @@ impl Element for InlineFlow {
         let layout_ref = layout_state.layout.clone();
 
         let layout_id = window.request_measured_layout(Default::default(), {
-            move |known_dimensions, available_space, window, _cx| {
+            move |known_dimensions, available_space, window, cx| {
                 let text_style = window.text_style();
                 let wrap_width = if text_style.white_space == WhiteSpace::Normal {
                     known_dimensions.width.or(match available_space.width {
@@ -199,6 +199,7 @@ impl Element for InlineFlow {
                     &measure_items,
                     &image_sizes,
                     &text_style,
+                    &cx.theme().mono_font_family,
                     wrap_width,
                     window,
                 );
@@ -356,6 +357,7 @@ fn layout_flow(
     items: &[MeasureItem],
     image_sizes: &[Option<Size<Pixels>>],
     text_style: &TextStyle,
+    mono_font_family: &SharedString,
     wrap_width: Option<Pixels>,
     window: &mut Window,
 ) -> InlineFlowLayout {
@@ -398,14 +400,11 @@ fn layout_flow(
                     let local_end = line_range.end.min(item_end) - item_start;
                     if local_start < local_end {
                         let subtext = SharedString::from(text[local_start..local_end].to_string());
-                        let highlights =
-                            slice_ranges(highlights, local_start, local_end, |range, style| {
-                                (range, *style)
-                            });
+                        let highlights = highlights.slice(local_start, local_end);
                         let links = slice_ranges(links, local_start, local_end, |range, link| {
                             (range, link.clone())
                         });
-                        let runs = runs_for_highlights(&subtext, text_style, highlights.clone());
+                        let runs = highlights.to_runs(&subtext, text_style, mono_font_family);
                         let shaped_line = shape_line(subtext.clone(), font_size, &runs, window);
                         let width = shaped_line.width();
                         line_width += width;
@@ -621,34 +620,6 @@ fn inline_image_size_for_line(
         .unwrap_or(1.);
 
     size((height * aspect_ratio).max(px(1.)), height.max(px(1.)))
-}
-
-fn runs_for_highlights(
-    text: &str,
-    default_style: &TextStyle,
-    highlights: Vec<(Range<usize>, HighlightStyle)>,
-) -> Vec<TextRun> {
-    let mut runs = Vec::new();
-    let mut ix = 0;
-
-    for (range, highlight) in highlights {
-        if ix < range.start {
-            runs.push(default_style.clone().to_run(range.start - ix));
-        }
-        runs.push(
-            default_style
-                .clone()
-                .highlight(highlight)
-                .to_run(range.len()),
-        );
-        ix = range.end;
-    }
-
-    if ix < text.len() {
-        runs.push(default_style.to_run(text.len() - ix));
-    }
-
-    runs
 }
 
 fn shape_line(

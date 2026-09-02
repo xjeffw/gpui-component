@@ -22,7 +22,7 @@ use crate::{
     text::{
         CodeBlockActionsFn, MarkdownExtensions, MarkdownNode,
         document::NodeRenderOptions,
-        inline::{Inline, InlineState},
+        inline::{Inline, InlineHighlights, InlineState},
         inline_flow::{InlineFlow, InlineFlowItem},
     },
     tooltip::Tooltip,
@@ -748,7 +748,7 @@ impl CodeBlock {
                         "code",
                         self.state.clone(),
                         vec![],
-                        self.styles(),
+                        InlineHighlights::from_styles(self.styles()),
                     ))
                     .when_some(node_cx.code_block_actions.clone(), |this, actions| {
                         this.child(
@@ -809,7 +809,7 @@ impl Paragraph {
         let mut child_nodes: Vec<AnyElement> = vec![];
 
         let mut text = String::new();
-        let mut highlights: Vec<(Range<usize>, HighlightStyle)> = vec![];
+        let mut highlights = InlineHighlights::default();
         let mut links: Vec<(Range<usize>, LinkMark)> = vec![];
         let mut offset = 0;
 
@@ -884,6 +884,7 @@ impl Paragraph {
                     }
                     if style.code {
                         highlight.background_color = Some(cx.theme().accent);
+                        highlights.code.push(inner_range.clone());
                     }
                     if let Some(color) = style.highlight {
                         highlight.background_color = Some(color);
@@ -909,7 +910,8 @@ impl Paragraph {
                     node_highlights.push((inner_range, highlight));
                 }
 
-                highlights = gpui::combine_highlights(highlights, node_highlights).collect();
+                highlights.styles =
+                    gpui::combine_highlights(highlights.styles, node_highlights).collect();
                 offset += text_len;
             }
             ix += 1;
@@ -939,7 +941,7 @@ impl Paragraph {
     fn inline_flow_items(&self, node_cx: &NodeContext, cx: &mut App) -> Vec<InlineFlowItem> {
         let mut items = Vec::new();
         let mut text = String::new();
-        let mut highlights: Vec<(Range<usize>, HighlightStyle)> = vec![];
+        let mut highlights = InlineHighlights::default();
         let mut links: Vec<(Range<usize>, LinkMark)> = vec![];
         let mut offset = 0;
 
@@ -998,6 +1000,7 @@ impl Paragraph {
                     }
                     if style.code {
                         highlight.background_color = Some(cx.theme().accent);
+                        highlights.code.push(inner_range.clone());
                     }
                     if let Some(color) = style.highlight {
                         highlight.background_color = Some(color);
@@ -1022,7 +1025,8 @@ impl Paragraph {
                     node_highlights.push((inner_range, highlight));
                 }
 
-                highlights = gpui::combine_highlights(highlights, node_highlights).collect();
+                highlights.styles =
+                    gpui::combine_highlights(highlights.styles, node_highlights).collect();
                 offset += text_len;
             }
         }

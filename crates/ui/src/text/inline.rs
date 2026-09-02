@@ -9,13 +9,113 @@ use gpui::{
     App, BorderStyle, Bounds, CursorStyle, Edges, Element, ElementId, GlobalElementId, Half,
     HighlightStyle, Hitbox, HitboxBehavior, InspectorElementId, IntoElement, LayoutId, MouseButton,
     MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, SharedString, StyledText,
-    TextLayout, Window, point, px, quad,
+    TextLayout, TextRun, TextStyle, Window, point, px, quad,
 };
 
 use crate::{
     ActiveTheme, WindowExt as _, global_state::GlobalState, input::Selection,
     text::TextViewMultiClickKind, text::node::LinkMark, text::selection::word_range_at,
 };
+
+/// The highlights of an inline text fragment.
+///
+/// [`HighlightStyle`] cannot express a font family, so the ranges covered by
+/// inline code spans are tracked separately from `styles` and rendered with the
+/// theme's monospace font family, like fenced code blocks are.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(super) struct InlineHighlights {
+    /// Styled ranges, as produced by the Markdown or HTML marks.
+    pub(super) styles: Vec<(Range<usize>, HighlightStyle)>,
+    /// Ranges covered by an inline code span.
+    pub(super) code: Vec<Range<usize>>,
+}
+
+impl InlineHighlights {
+    /// Highlights that only carry styled ranges, e.g. code block syntax colors.
+    pub(super) fn from_styles(styles: Vec<(Range<usize>, HighlightStyle)>) -> Self {
+        Self {
+            styles,
+            code: Vec::new(),
+        }
+    }
+
+    pub(super) fn clear(&mut self) {
+        self.styles.clear();
+        self.code.clear();
+    }
+
+    /// The highlights within `start..end`, rebased to start at 0.
+    pub(super) fn slice(&self, start: usize, end: usize) -> Self {
+        let clip = |range: &Range<usize>| {
+            let clipped_start = range.start.max(start);
+            let clipped_end = range.end.min(end);
+            (clipped_start < clipped_end).then(|| (clipped_start - start)..(clipped_end - start))
+        };
+
+        Self {
+            styles: self
+                .styles
+                .iter()
+                .filter_map(|(range, style)| Some((clip(range)?, *style)))
+                .collect(),
+            code: self.code.iter().filter_map(clip).collect(),
+        }
+    }
+
+    /// Build the text runs for `text`.
+    ///
+    /// Runs are split at every highlight boundary, so an inline code span keeps
+    /// `mono_font_family` even when it is only part of a styled range.
+    pub(super) fn to_runs(
+        &self,
+        text: &str,
+        default_style: &TextStyle,
+        mono_font_family: &SharedString,
+    ) -> Vec<TextRun> {
+        if text.is_empty() {
+            return Vec::new();
+        }
+        if self.styles.is_empty() && self.code.is_empty() {
+            return vec![default_style.to_run(text.len())];
+        }
+
+        let mut boundaries = vec![0, text.len()];
+        for range in self
+            .styles
+            .iter()
+            .map(|(range, _)| range)
+            .chain(self.code.iter())
+        {
+            boundaries.push(range.start.min(text.len()));
+            boundaries.push(range.end.min(text.len()));
+        }
+        boundaries.sort_unstable();
+        boundaries.dedup();
+
+        boundaries
+            .windows(2)
+            .map(|boundary| {
+                let (start, end) = (boundary[0], boundary[1]);
+                let mut style = default_style.clone();
+                for (_, highlight) in self
+                    .styles
+                    .iter()
+                    .filter(|(range, _)| range.start <= start && end <= range.end)
+                {
+                    style = style.highlight(*highlight);
+                }
+                if self
+                    .code
+                    .iter()
+                    .any(|range| range.start <= start && end <= range.end)
+                {
+                    style.font_family = mono_font_family.clone();
+                }
+                style.to_run(end - start)
+            })
+            .collect()
+    }
+}
 
 /// A inline element used to render a inline text and support selectable.
 ///
@@ -24,7 +124,7 @@ pub(super) struct Inline {
     id: ElementId,
     text: SharedString,
     links: Rc<Vec<(Range<usize>, LinkMark)>>,
-    highlights: Vec<(Range<usize>, HighlightStyle)>,
+    highlights: InlineHighlights,
     styled_text: StyledText,
 
     state: Arc<Mutex<InlineState>>,
@@ -51,7 +151,7 @@ impl Inline {
         id: impl Into<ElementId>,
         state: Arc<Mutex<InlineState>>,
         links: Vec<(Range<usize>, LinkMark)>,
-        highlights: Vec<(Range<usize>, HighlightStyle)>,
+        highlights: InlineHighlights,
     ) -> Self {
         let text = state
             .lock()
@@ -339,19 +439,10 @@ impl Element for Inline {
         cx: &mut App,
     ) -> (LayoutId, Self::RequestLayoutState) {
         let text_style = window.text_style();
-
-        let mut runs = Vec::new();
-        let mut ix = 0;
-        for (range, highlight) in self.highlights.iter() {
-            if ix < range.start {
-                runs.push(text_style.clone().to_run(range.start - ix));
-            }
-            runs.push(text_style.clone().highlight(*highlight).to_run(range.len()));
-            ix = range.end;
-        }
-        if ix < self.text.len() {
-            runs.push(text_style.to_run(self.text.len() - ix));
-        }
+        let mono_font_family = cx.theme().mono_font_family.clone();
+        let runs = self
+            .highlights
+            .to_runs(&self.text, &text_style, &mono_font_family);
 
         self.styled_text = StyledText::new(self.text.clone()).with_runs(runs);
         let (layout_id, _) =
@@ -849,5 +940,75 @@ mod tests {
             end,
             line_height
         ));
+    }
+}
+
+#[cfg(test)]
+mod highlight_tests {
+    use super::*;
+    use gpui::{FontWeight, TextStyle};
+
+    fn bold() -> HighlightStyle {
+        HighlightStyle {
+            font_weight: Some(FontWeight::BOLD),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn code_spans_run_with_the_monospace_font_family() {
+        // "run `cargo` **test** now", with the emphasis spanning the code span.
+        let text = "run cargo test now";
+        let highlights = InlineHighlights {
+            styles: vec![(4..13, bold())],
+            code: vec![4..9],
+        };
+
+        let style = TextStyle::default();
+        let runs = highlights.to_runs(text, &style, &"Monospace".into());
+
+        let lengths = runs.iter().map(|run| run.len).collect::<Vec<_>>();
+        assert_eq!(lengths, vec![4, 5, 4, 5]);
+        assert_eq!(runs[1].font.family, "Monospace");
+        assert_eq!(runs[1].font.weight, FontWeight::BOLD);
+        // Text around the code span keeps the inherited family.
+        assert_eq!(runs[0].font.family, style.font_family);
+        assert_eq!(runs[2].font.family, style.font_family);
+        assert_eq!(runs[2].font.weight, FontWeight::BOLD);
+        assert_eq!(runs[3].font.family, style.font_family);
+    }
+
+    #[test]
+    fn empty_text_has_no_runs() {
+        let runs =
+            InlineHighlights::default().to_runs("", &TextStyle::default(), &"Monospace".into());
+
+        assert!(runs.is_empty());
+    }
+
+    #[test]
+    fn text_without_highlights_runs_as_one_fragment() {
+        let runs = InlineHighlights::default().to_runs(
+            "plain text",
+            &TextStyle::default(),
+            &"Monospace".into(),
+        );
+
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].len, "plain text".len());
+    }
+
+    #[test]
+    fn slicing_keeps_the_code_spans_of_a_wrapped_line() {
+        let highlights = InlineHighlights {
+            styles: vec![(0..4, bold()), (4..9, HighlightStyle::default())],
+            code: vec![4..9],
+        };
+
+        let sliced = highlights.slice(2, 7);
+
+        assert_eq!(sliced.code, vec![2..5]);
+        assert_eq!(sliced.styles[0].0, 0..2);
+        assert_eq!(sliced.styles[1].0, 2..5);
     }
 }
