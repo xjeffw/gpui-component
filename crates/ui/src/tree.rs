@@ -207,6 +207,7 @@ pub struct TreeState {
     scroll_handle: UniformListScrollHandle,
     selected_ix: Option<usize>,
     right_clicked_ix: Option<usize>,
+    measurement_key: Option<u64>,
     render_item: Rc<dyn Fn(usize, &TreeEntry, bool, &mut Window, &mut App) -> ListItem>,
     context_menu_builder: Option<
         Rc<dyn Fn(usize, &TreeEntry, PopupMenu, &mut Window, &mut Context<TreeState>) -> PopupMenu>,
@@ -221,6 +222,7 @@ impl TreeState {
         Self {
             selected_ix: None,
             right_clicked_ix: None,
+            measurement_key: None,
             focus_handle: cx.focus_handle(),
             scroll_handle: UniformListScrollHandle::default(),
             entries: Vec::new(),
@@ -242,6 +244,7 @@ impl TreeState {
     /// Set the tree items.
     pub fn set_items(&mut self, items: impl Into<Vec<TreeItem>>, cx: &mut Context<Self>) {
         let items = items.into();
+        self.scroll_handle.invalidate_measurement();
         self.entries.clear();
         for item in items.into_iter() {
             self.add_entry(item, 0);
@@ -377,6 +380,7 @@ impl TreeState {
     }
 
     fn rebuild_entries(&mut self) {
+        self.scroll_handle.invalidate_measurement();
         let root_items: Vec<TreeItem> = self
             .entries
             .iter()
@@ -466,6 +470,12 @@ impl Render for TreeState {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let render_item = self.render_item.clone();
         let state = cx.entity().clone();
+        let measurement_key = self.measurement_key.map(|key| {
+            key.wrapping_mul(31)
+                .wrapping_add(self.selected_ix.unwrap_or(usize::MAX) as u64)
+                .wrapping_mul(31)
+                .wrapping_add(self.right_clicked_ix.unwrap_or(usize::MAX) as u64)
+        });
 
         div()
             .id("tree-state")
@@ -544,6 +554,7 @@ impl Render for TreeState {
                 .size_full()
                 .track_scroll(&self.scroll_handle)
                 .with_sizing_behavior(ListSizingBehavior::Auto)
+                .when_some(measurement_key, |list, key| list.with_measurement_key(key))
                 .into_any_element(),
             )
     }
@@ -555,6 +566,7 @@ pub struct Tree {
     id: ElementId,
     state: Entity<TreeState>,
     style: StyleRefinement,
+    measurement_key: Option<u64>,
     render_item: Rc<dyn Fn(usize, &TreeEntry, bool, &mut Window, &mut App) -> ListItem>,
     context_menu_builder: Option<
         Rc<dyn Fn(usize, &TreeEntry, PopupMenu, &mut Window, &mut Context<TreeState>) -> PopupMenu>,
@@ -570,11 +582,19 @@ impl Tree {
             id: ElementId::Name(format!("tree-{}", state.entity_id()).into()),
             state: state.clone(),
             style: StyleRefinement::default(),
+            measurement_key: None,
             render_item: Rc::new(move |ix, item, selected, window, app| {
                 render_item(ix, item, selected, window, app)
             }),
             context_menu_builder: None,
         }
+    }
+
+    /// Reuse the first row's measurement while `render_item` has the same layout.
+    /// Change `key` when the row's content can change size.
+    pub fn with_measurement_key(mut self, key: u64) -> Self {
+        self.measurement_key = Some(key);
+        self
     }
 
     /// Add a context menu to the tree.
@@ -607,6 +627,7 @@ impl RenderOnce for Tree {
         self.state.update(cx, |state, _| {
             state.render_item = self.render_item;
             state.context_menu_builder = self.context_menu_builder;
+            state.measurement_key = self.measurement_key;
         });
 
         div()

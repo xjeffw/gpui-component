@@ -32,10 +32,10 @@ gpui-component-macros = { path = "crates/macros", version = "0.5.1" }
 gpui-component-assets = { path = "crates/assets", version = "0.5.1" }
 story = { path = "crates/story" }
 
-gpui = { git = "https://github.com/xjeffw/gpui-ce.git", rev = "8997b2f38adb6c316c456033b1e85997eeb30998" }
-gpui_platform = { git = "https://github.com/xjeffw/gpui-ce.git", rev = "8997b2f38adb6c316c456033b1e85997eeb30998", features = ["font-kit", "x11", "wayland", "runtime_shaders"] }
-gpui_web = { git = "https://github.com/xjeffw/gpui-ce.git", rev = "8997b2f38adb6c316c456033b1e85997eeb30998" }
-gpui_macros = { git = "https://github.com/xjeffw/gpui-ce.git", rev = "8997b2f38adb6c316c456033b1e85997eeb30998" }
+gpui = { git = "https://github.com/xjeffw/gpui-ce.git", rev = "a988a513f8b683ccf6c2e3ec5bee9f78389668d3" }
+gpui_platform = { git = "https://github.com/xjeffw/gpui-ce.git", rev = "a988a513f8b683ccf6c2e3ec5bee9f78389668d3", features = ["font-kit", "x11", "wayland", "runtime_shaders"] }
+gpui_web = { git = "https://github.com/xjeffw/gpui-ce.git", rev = "a988a513f8b683ccf6c2e3ec5bee9f78389668d3" }
+gpui_macros = { git = "https://github.com/xjeffw/gpui-ce.git", rev = "a988a513f8b683ccf6c2e3ec5bee9f78389668d3" }
 http_client = { git = "https://github.com/zed-industries/zed" }
 reqwest_client = { git = "https://github.com/zed-industries/zed" }
 sum-tree = { version = "0.2.0", package = "zed-sum-tree" }
